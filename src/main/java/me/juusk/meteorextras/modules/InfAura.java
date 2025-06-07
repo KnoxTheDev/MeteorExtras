@@ -24,6 +24,7 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.Ownable; // Added for clarity, Tameable extends Ownable
 import net.minecraft.entity.Tameable;
 import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.ZombifiedPiglinEntity;
@@ -31,6 +32,8 @@ import net.minecraft.entity.passive.AnimalEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.*;
+import net.minecraft.item.SwordItem; // Explicit import for SwordItem
+// MaceItem and TridentItem are covered by net.minecraft.item.*
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
@@ -256,11 +259,15 @@ public class InfAura extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (!mc.player.isAlive() || PlayerUtils.getGameMode() == GameMode.SPECTATOR) return;
-        if (pauseOnUse.get() && (mc.interactionManager.isBreakingBlock() || mc.player.isUsingItem())) return;
-        if (onlyOnClick.get() && !mc.options.attackKey.isPressed()) return;
+        if (mc.player == null || mc.world == null || !mc.player.isAlive() || PlayerUtils.getGameMode() == GameMode.SPECTATOR) return;
+        if (pauseOnUse.get() && (mc.interactionManager != null && mc.interactionManager.isBreakingBlock() || mc.player.isUsingItem())) return;
+        if (onlyOnClick.get() && (mc.options == null || !mc.options.attackKey.isPressed())) return;
         if (TickRate.INSTANCE.getTimeSinceLastTick() >= 1f && pauseOnLag.get()) return;
-        if (pauseOnCA.get() && Modules.get().get(CrystalAura.class).isActive() && Modules.get().get(CrystalAura.class).kaTimer > 0) return;
+        if (pauseOnCA.get()) {
+            CrystalAura crystalAura = Modules.get().get(CrystalAura.class);
+            if (crystalAura.isActive() && crystalAura.kaTimer > 0) return;
+        }
+
 
         if (onlyOnLook.get()) {
             Entity targeted = mc.targetedEntity;
@@ -325,18 +332,20 @@ public class InfAura extends Module {
     }
 
     private boolean shouldShieldBreak() {
+        if (mc.world == null || mc.player == null) return false;
         for (Entity target : targets) {
             if (target instanceof PlayerEntity player) {
-                if (player.blockedByShield(mc.world.getDamageSources().playerAttack(mc.player)) && shieldMode.get() == ShieldMode.Break) {
+                // Changed blockedByShield to isBlocking
+                if (player.isBlocking() && shieldMode.get() == ShieldMode.Break) {
                     return true;
                 }
             }
         }
-
         return false;
     }
 
     private boolean entityCheck(Entity entity) {
+        if (mc.player == null || mc.world == null) return false;
         if (entity.equals(mc.player) || entity.equals(mc.cameraEntity)) return false;
         if ((entity instanceof LivingEntity livingEntity && livingEntity.isDead()) || !entity.isAlive()) return false;
 
@@ -351,21 +360,27 @@ public class InfAura extends Module {
         if (!entities.get().contains(entity.getType())) return false;
         if (ignoreNamed.get() && entity.hasCustomName()) return false;
         if (!PlayerUtils.canSeeEntity(entity) && !PlayerUtils.isWithin(entity, wallsRange.get())) return false;
+
         if (ignoreTamed.get()) {
-            if (entity instanceof Tameable tameable
-                && tameable.getOwnerUuid() != null
-                && tameable.getOwnerUuid().equals(mc.player.getUuid())
-            ) return false;
+            // Tameable interface extends Ownable, which has getOwnerUuid().
+            // This check should be valid if Tameable and Ownable are correctly mapped for your MC version.
+            if (entity instanceof Tameable tameableEntity) {
+                if (tameableEntity.getOwnerUuid() != null && tameableEntity.getOwnerUuid().equals(mc.player.getUuid())) {
+                    return false;
+                }
+            }
         }
+
         if (ignorePassive.get()) {
             if (entity instanceof EndermanEntity enderman && !enderman.isAngry()) return false;
             if (entity instanceof ZombifiedPiglinEntity piglin && !piglin.isAttacking()) return false;
-            if (entity instanceof WolfEntity wolf && !wolf.isAttacking()) return false;
+            if (entity instanceof WolfEntity wolf && !wolf.isAttacking() && wolf.getOwnerUuid() != mc.player.getUuid()) return false; // Avoid attacking own, non-angry wolves
         }
         if (entity instanceof PlayerEntity player) {
             if (player.isCreative()) return false;
-            if (!Friends.get().shouldAttack(player)) return false;
-            if (shieldMode.get() == ShieldMode.Ignore && player.blockedByShield(mc.world.getDamageSources().playerAttack(mc.player))) return false;
+            if (Friends.get() != null && !Friends.get().shouldAttack(player)) return false;
+            // Changed blockedByShield to isBlocking
+            if (shieldMode.get() == ShieldMode.Ignore && player.isBlocking()) return false;
         }
         if (entity instanceof AnimalEntity animal) {
             return switch (mobAgeFilter.get()) {
@@ -378,33 +393,55 @@ public class InfAura extends Module {
     }
 
     private boolean delayCheck() {
+        if (mc.player == null) return false;
         if (switchTimer > 0) {
             switchTimer--;
             return false;
         }
 
-        float delay = (customDelay.get()) ? hitDelay.get() : 0.5f;
-        if (tpsSync.get()) delay /= (TickRate.INSTANCE.getTickRate() / 20);
+        float delay = (customDelay.get()) ? hitDelay.get() : 0.5f; // Default vanilla cooldown is 0.5s or 10 ticks. getAttackCooldownProgress takes value from 0-1
+        if (tpsSync.get()) delay /= (TickRate.INSTANCE.getTickRate() / 20); // Scale delay with TPS
 
         if (customDelay.get()) {
-            if (hitTimer < delay) {
+            if (hitTimer < delay) { // If using custom delay in ticks
                 hitTimer++;
                 return false;
-            } else return true;
-        } else return mc.player.getAttackCooldownProgress(delay) >= 1;
+            } else {
+                // hitTimer reset in attack()
+                return true;
+            }
+        } else {
+            // For vanilla cooldown, getAttackCooldownProgress expects a value indicating
+            // how much of the cooldown has passed. 0.5f means 50% of the base cooldown time.
+            // The method getAttackCooldownProgress(float baseTime) is actually getAttackCooldownProgressPerTick()
+            // and the parameter is not used in yarn mappings. It's just mc.player.getAttackCooldownProgress(0) in Meteor.
+            // A common check is mc.player.getAttackCooldownProgress(0.0f) >= 1.0f for full cooldown.
+            // Or more simply, if not using custom delay, rely on vanilla mechanics:
+            return mc.player.getAttackCooldownProgress(0.5f) >= 1; // Use 0.5f as in original, assumes it's relevant for Meteor's context
+        }
     }
 
+
     private void attack(Entity target) {
+        if (mc.player == null || mc.interactionManager == null) return;
         if (rotation.get() == RotationMode.OnHit) Rotations.rotate(Rotations.getYaw(target), Rotations.getPitch(target, Target.Body));
-        ModuleUtils.splitTeleport(mc.player.getPos(), target.getPos(), perBlink.get());
+
+        // Store original position for teleporting back
+        Vec3d originalPos = mc.player.getPos();
+
+        ModuleUtils.splitTeleport(originalPos, target.getPos(), perBlink.get());
         mc.interactionManager.attackEntity(mc.player, target);
         mc.player.swingHand(Hand.MAIN_HAND);
-        ModuleUtils.splitTeleport(target.getPos(), mc.player.getPos(), perBlink.get());
+        // Teleport back to original position or target's last known position before attack
+        // Teleporting back to player's original pos might be safer to avoid anti-cheat.
+        ModuleUtils.splitTeleport(target.getPos(), originalPos, perBlink.get());
+
 
         hitTimer = 0;
     }
 
     private boolean itemInHand() {
+        if (mc.player == null) return false;
         if (shouldShieldBreak()) return mc.player.getMainHandStack().getItem() instanceof AxeItem;
 
         return switch (weapon.get()) {
@@ -454,5 +491,4 @@ public class InfAura extends Module {
         Adult,
         Both
     }
-
 }
