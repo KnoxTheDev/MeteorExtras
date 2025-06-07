@@ -24,7 +24,7 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.Ownable;
+import net.minecraft.entity.Ownable; // Ownable interface import
 import net.minecraft.entity.Tameable;
 import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.ZombifiedPiglinEntity;
@@ -33,7 +33,6 @@ import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.*;
 // import net.minecraft.item.SwordItem; // SwordItem class not found in the build environment.
-// MaceItem and TridentItem are covered by net.minecraft.item.*
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
@@ -296,7 +295,7 @@ public class InfAura extends Module {
         if (autoSwitch.get()) {
             Predicate<ItemStack> predicate = switch (weapon.get()) {
                 case Axe -> stack -> stack.getItem() instanceof AxeItem;
-                case Sword -> stack -> false; // SwordItem class not found, so cannot check for swords.
+                case Sword -> stack -> false; // SwordItem class not found
                 case Mace -> stack -> stack.getItem() instanceof MaceItem;
                 case Trident -> stack -> stack.getItem() instanceof TridentItem;
                 case All -> stack -> stack.getItem() instanceof AxeItem || /* SwordItem check removed */ stack.getItem() instanceof MaceItem || stack.getItem() instanceof TridentItem;
@@ -360,18 +359,35 @@ public class InfAura extends Module {
         if (ignoreNamed.get() && entity.hasCustomName()) return false;
         if (!PlayerUtils.canSeeEntity(entity) && !PlayerUtils.isWithin(entity, wallsRange.get())) return false;
 
-        if (ignoreTamed.get()) {
-            if (entity instanceof Tameable tameableEntity) {
-                if (tameableEntity.getOwnerUuid() != null && tameableEntity.getOwnerUuid().equals(mc.player.getUuid())) {
-                    return false;
-                }
+        if (ignoreTamed.get() && entity instanceof Tameable) {
+            // Cast to Ownable to access getOwnerUuid()
+            Ownable ownableEntity = (Ownable) entity;
+            if (ownableEntity.getOwnerUuid() != null && ownableEntity.getOwnerUuid().equals(mc.player.getUuid())) {
+                return false;
             }
         }
 
         if (ignorePassive.get()) {
             if (entity instanceof EndermanEntity enderman && !enderman.isAngry()) return false;
             if (entity instanceof ZombifiedPiglinEntity piglin && !piglin.isAttacking()) return false;
-            if (entity instanceof WolfEntity wolf && !wolf.isAttacking() && wolf.getOwnerUuid() != mc.player.getUuid()) return false;
+            if (entity instanceof WolfEntity wolf && !wolf.isAttacking()) {
+                 // Cast to Ownable to access getOwnerUuid() for WolfEntity
+                Ownable ownableWolf = (Ownable) wolf;
+                if (ownableWolf.getOwnerUuid() != null && ownableWolf.getOwnerUuid().equals(mc.player.getUuid())) {
+                    // It's our own wolf and it's not attacking, so don't attack it.
+                } else if (ownableWolf.getOwnerUuid() == null || !ownableWolf.getOwnerUuid().equals(mc.player.getUuid())) {
+                    // It's a wild wolf or someone else's wolf and it's not attacking, ignore.
+                    // This specific condition might need adjustment based on desired behavior for non-owned, non-attacking wolves.
+                    // The original check was `wolf.getOwnerUuid() != mc.player.getUuid()`, which would attack unowned, non-aggressive wolves.
+                    // For now, let's keep it simple: if it's not attacking AND it's not OUR wolf, ignore it.
+                    // If it IS our wolf and not attacking, it's already handled by ignoreTamed if that's on.
+                    // The `ignoreTamed` check for general Tameable should cover our wolf.
+                    // So, if it's a wolf, not attacking, and not ours, then return false.
+                    return false; // Simplified: if not angry and not our tamed wolf (covered by ignoreTamed), ignore.
+                                  // If it *is* our tamed wolf, ignoreTamed handles it.
+                                  // If it's wild and not angry, ignore.
+                }
+            }
         }
         if (entity instanceof PlayerEntity player) {
             if (player.isCreative()) return false;
@@ -396,7 +412,10 @@ public class InfAura extends Module {
         }
 
         float delay = (customDelay.get()) ? hitDelay.get() : 0.5f;
-        if (tpsSync.get()) delay /= (TickRate.INSTANCE.getTickRate() / 20);
+        if (tpsSync.get() && TickRate.INSTANCE.getTickRate() > 0) { // Avoid division by zero if tick rate is 0
+             delay /= (TickRate.INSTANCE.getTickRate() / 20);
+        }
+
 
         if (customDelay.get()) {
             if (hitTimer < delay) {
@@ -432,7 +451,7 @@ public class InfAura extends Module {
 
         return switch (weapon.get()) {
             case Axe -> mc.player.getMainHandStack().getItem() instanceof AxeItem;
-            case Sword -> false; // SwordItem class not found, so cannot check for swords.
+            case Sword -> false; // SwordItem class not found
             case Mace -> mc.player.getMainHandStack().getItem() instanceof MaceItem;
             case Trident -> mc.player.getMainHandStack().getItem() instanceof TridentItem;
             case All -> mc.player.getMainHandStack().getItem() instanceof AxeItem || /* SwordItem check removed */ mc.player.getMainHandStack().getItem() instanceof MaceItem || mc.player.getMainHandStack().getItem() instanceof TridentItem;
