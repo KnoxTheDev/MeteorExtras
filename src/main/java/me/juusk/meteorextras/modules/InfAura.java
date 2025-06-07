@@ -24,7 +24,7 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.Ownable; // Added for clarity, Tameable extends Ownable
+import net.minecraft.entity.Ownable;
 import net.minecraft.entity.Tameable;
 import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.ZombifiedPiglinEntity;
@@ -32,7 +32,7 @@ import net.minecraft.entity.passive.AnimalEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.*;
-import net.minecraft.item.SwordItem; // Explicit import for SwordItem
+// import net.minecraft.item.SwordItem; // SwordItem class not found in the build environment.
 // MaceItem and TridentItem are covered by net.minecraft.item.*
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
@@ -296,10 +296,10 @@ public class InfAura extends Module {
         if (autoSwitch.get()) {
             Predicate<ItemStack> predicate = switch (weapon.get()) {
                 case Axe -> stack -> stack.getItem() instanceof AxeItem;
-                case Sword -> stack -> stack.getItem() instanceof SwordItem;
+                case Sword -> stack -> false; // SwordItem class not found, so cannot check for swords.
                 case Mace -> stack -> stack.getItem() instanceof MaceItem;
                 case Trident -> stack -> stack.getItem() instanceof TridentItem;
-                case All -> stack -> stack.getItem() instanceof AxeItem || stack.getItem() instanceof SwordItem || stack.getItem() instanceof MaceItem || stack.getItem() instanceof TridentItem;
+                case All -> stack -> stack.getItem() instanceof AxeItem || /* SwordItem check removed */ stack.getItem() instanceof MaceItem || stack.getItem() instanceof TridentItem;
                 default -> o -> true;
             };
             FindItemResult weaponResult = InvUtils.findInHotbar(predicate);
@@ -335,7 +335,6 @@ public class InfAura extends Module {
         if (mc.world == null || mc.player == null) return false;
         for (Entity target : targets) {
             if (target instanceof PlayerEntity player) {
-                // Changed blockedByShield to isBlocking
                 if (player.isBlocking() && shieldMode.get() == ShieldMode.Break) {
                     return true;
                 }
@@ -362,8 +361,6 @@ public class InfAura extends Module {
         if (!PlayerUtils.canSeeEntity(entity) && !PlayerUtils.isWithin(entity, wallsRange.get())) return false;
 
         if (ignoreTamed.get()) {
-            // Tameable interface extends Ownable, which has getOwnerUuid().
-            // This check should be valid if Tameable and Ownable are correctly mapped for your MC version.
             if (entity instanceof Tameable tameableEntity) {
                 if (tameableEntity.getOwnerUuid() != null && tameableEntity.getOwnerUuid().equals(mc.player.getUuid())) {
                     return false;
@@ -374,12 +371,11 @@ public class InfAura extends Module {
         if (ignorePassive.get()) {
             if (entity instanceof EndermanEntity enderman && !enderman.isAngry()) return false;
             if (entity instanceof ZombifiedPiglinEntity piglin && !piglin.isAttacking()) return false;
-            if (entity instanceof WolfEntity wolf && !wolf.isAttacking() && wolf.getOwnerUuid() != mc.player.getUuid()) return false; // Avoid attacking own, non-angry wolves
+            if (entity instanceof WolfEntity wolf && !wolf.isAttacking() && wolf.getOwnerUuid() != mc.player.getUuid()) return false;
         }
         if (entity instanceof PlayerEntity player) {
             if (player.isCreative()) return false;
             if (Friends.get() != null && !Friends.get().shouldAttack(player)) return false;
-            // Changed blockedByShield to isBlocking
             if (shieldMode.get() == ShieldMode.Ignore && player.isBlocking()) return false;
         }
         if (entity instanceof AnimalEntity animal) {
@@ -399,25 +395,18 @@ public class InfAura extends Module {
             return false;
         }
 
-        float delay = (customDelay.get()) ? hitDelay.get() : 0.5f; // Default vanilla cooldown is 0.5s or 10 ticks. getAttackCooldownProgress takes value from 0-1
-        if (tpsSync.get()) delay /= (TickRate.INSTANCE.getTickRate() / 20); // Scale delay with TPS
+        float delay = (customDelay.get()) ? hitDelay.get() : 0.5f;
+        if (tpsSync.get()) delay /= (TickRate.INSTANCE.getTickRate() / 20);
 
         if (customDelay.get()) {
-            if (hitTimer < delay) { // If using custom delay in ticks
+            if (hitTimer < delay) {
                 hitTimer++;
                 return false;
             } else {
-                // hitTimer reset in attack()
                 return true;
             }
         } else {
-            // For vanilla cooldown, getAttackCooldownProgress expects a value indicating
-            // how much of the cooldown has passed. 0.5f means 50% of the base cooldown time.
-            // The method getAttackCooldownProgress(float baseTime) is actually getAttackCooldownProgressPerTick()
-            // and the parameter is not used in yarn mappings. It's just mc.player.getAttackCooldownProgress(0) in Meteor.
-            // A common check is mc.player.getAttackCooldownProgress(0.0f) >= 1.0f for full cooldown.
-            // Or more simply, if not using custom delay, rely on vanilla mechanics:
-            return mc.player.getAttackCooldownProgress(0.5f) >= 1; // Use 0.5f as in original, assumes it's relevant for Meteor's context
+            return mc.player.getAttackCooldownProgress(0.5f) >= 1;
         }
     }
 
@@ -426,14 +415,11 @@ public class InfAura extends Module {
         if (mc.player == null || mc.interactionManager == null) return;
         if (rotation.get() == RotationMode.OnHit) Rotations.rotate(Rotations.getYaw(target), Rotations.getPitch(target, Target.Body));
 
-        // Store original position for teleporting back
         Vec3d originalPos = mc.player.getPos();
 
         ModuleUtils.splitTeleport(originalPos, target.getPos(), perBlink.get());
         mc.interactionManager.attackEntity(mc.player, target);
         mc.player.swingHand(Hand.MAIN_HAND);
-        // Teleport back to original position or target's last known position before attack
-        // Teleporting back to player's original pos might be safer to avoid anti-cheat.
         ModuleUtils.splitTeleport(target.getPos(), originalPos, perBlink.get());
 
 
@@ -446,10 +432,10 @@ public class InfAura extends Module {
 
         return switch (weapon.get()) {
             case Axe -> mc.player.getMainHandStack().getItem() instanceof AxeItem;
-            case Sword -> mc.player.getMainHandStack().getItem() instanceof SwordItem;
+            case Sword -> false; // SwordItem class not found, so cannot check for swords.
             case Mace -> mc.player.getMainHandStack().getItem() instanceof MaceItem;
             case Trident -> mc.player.getMainHandStack().getItem() instanceof TridentItem;
-            case All -> mc.player.getMainHandStack().getItem() instanceof AxeItem || mc.player.getMainHandStack().getItem() instanceof SwordItem || mc.player.getMainHandStack().getItem() instanceof MaceItem || mc.player.getMainHandStack().getItem() instanceof TridentItem;
+            case All -> mc.player.getMainHandStack().getItem() instanceof AxeItem || /* SwordItem check removed */ mc.player.getMainHandStack().getItem() instanceof MaceItem || mc.player.getMainHandStack().getItem() instanceof TridentItem;
             default -> true;
         };
     }
