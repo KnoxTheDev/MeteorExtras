@@ -1,6 +1,5 @@
 package me.juusk.meteorextras.mixin;
 
-import me.juusk.meteorextras.modules.AutoOminous;
 import me.juusk.meteorextras.utils.BossBarExtension;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.render.NoRender;
@@ -28,15 +27,6 @@ public abstract class BossBarHudMixin {
             public void add(UUID uuid, Text name, float percent, BossBar.Color color, BossBar.Style style, boolean darkenSky, boolean dragonMusic, boolean thickenFog) {
                 Modules.get().get(AutoOminous.class).bossBars.add(new BossBarExtension(uuid, name));
                 BossBarS2CPacket.Consumer.super.add(uuid, name, percent, color, style, darkenSky, dragonMusic, thickenFog);
-            }
-            @Override
-            public void remove(UUID uuid) {
-                for(BossBarExtension extension : Modules.get().get(AutoOminous.class).bossBars) {
-                    if(extension.uuid == uuid) {
-                        Modules.get().get(AutoOminous.class).bossBars.remove(extension);
-                    }
-                }
-                BossBarS2CPacket.Consumer.super.remove(uuid);
             }
         });
     }
