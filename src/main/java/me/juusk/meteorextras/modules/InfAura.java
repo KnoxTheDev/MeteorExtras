@@ -416,3 +416,4 @@ public class InfAura extends Module {
         Break,
         None
     }
+}
