@@ -22,17 +22,10 @@ import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.Ownable; // Ownable interface import
-import net.minecraft.entity.Tameable;
-import net.minecraft.entity.mob.EndermanEntity;
-import net.minecraft.entity.mob.ZombifiedPiglinEntity;
-import net.minecraft.entity.passive.AnimalEntity;
-import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.*;
-// import net.minecraft.item.SwordItem; // SwordItem class not found in the build environment.
+// import net.minecraft.item.SwordItem; // SwordItem class not found
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
@@ -43,7 +36,7 @@ import net.minecraft.world.GameMode;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
+// import java.util.Set; // No longer needed for EntityTypeListSetting
 import java.util.function.Predicate;
 
 public class InfAura extends Module {
@@ -102,15 +95,6 @@ public class InfAura extends Module {
     );
 
     // Targeting
-
-    private final Setting<Set<EntityType<?>>> entities = sgTargeting.add(new EntityTypeListSetting.Builder()
-        .name("entities")
-        .description("Entities to attack.")
-        .onlyAttackable()
-        .defaultValue(EntityType.PLAYER)
-        .build()
-    );
-
     private final Setting<SortPriority> priority = sgTargeting.add(new EnumSetting.Builder<SortPriority>()
         .name("priority")
         .description("How to filter targets within range.")
@@ -157,36 +141,14 @@ public class InfAura extends Module {
         .build()
     );
 
-    private final Setting<EntityAge> mobAgeFilter = sgTargeting.add(new EnumSetting.Builder<EntityAge>()
-        .name("mob-age-filter")
-        .description("Determines the age of the mobs to target (baby, adult, or both).")
-        .defaultValue(EntityAge.Adult)
-        .build()
-    );
-
     private final Setting<Boolean> ignoreNamed = sgTargeting.add(new BoolSetting.Builder()
         .name("ignore-named")
-        .description("Whether or not to attack mobs with a name.")
-        .defaultValue(false)
-        .build()
-    );
-
-    private final Setting<Boolean> ignorePassive = sgTargeting.add(new BoolSetting.Builder()
-        .name("ignore-passive")
-        .description("Will only attack sometimes passive mobs if they are targeting you.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Boolean> ignoreTamed = sgTargeting.add(new BoolSetting.Builder()
-        .name("ignore-tamed")
-        .description("Will avoid attacking mobs you tamed.")
+        .description("Whether or not to attack players with a custom name.")
         .defaultValue(false)
         .build()
     );
 
     // Timing
-
     private final Setting<Boolean> pauseOnLag = sgTiming.add(new BoolSetting.Builder()
         .name("pause-on-lag")
         .description("Pauses if the server is lagging.")
@@ -247,7 +209,7 @@ public class InfAura extends Module {
     public boolean attacking;
 
     public InfAura() {
-        super(MeteorExtras.CATEGORY, "InfAura", "KillAura with infinite reach");
+        super(MeteorExtras.CATEGORY, "InfAura-Players", "KillAura with infinite reach, targets Players ONLY.");
     }
 
     @Override
@@ -267,15 +229,14 @@ public class InfAura extends Module {
             if (crystalAura.isActive() && crystalAura.kaTimer > 0) return;
         }
 
-
         if (onlyOnLook.get()) {
             Entity targeted = mc.targetedEntity;
-
-            if (targeted == null) return;
-            if (!entityCheck(targeted)) return;
-
-            targets.clear();
-            targets.add(mc.targetedEntity);
+            if (targeted == null || !entityCheck(targeted)) { // entityCheck now hardcodes to players
+                targets.clear(); // Clear targets if look target is invalid
+            } else {
+                targets.clear();
+                targets.add(targeted);
+            }
         } else {
             targets.clear();
             TargetUtils.getList(targets, this::entityCheck, priority.get(), maxTargets.get());
@@ -290,7 +251,7 @@ public class InfAura extends Module {
             return;
         }
 
-        Entity primary = targets.getFirst();
+        Entity primary = targets.getFirst(); // Should always be a PlayerEntity now
 
         if (autoSwitch.get()) {
             Predicate<ItemStack> predicate = switch (weapon.get()) {
@@ -303,7 +264,7 @@ public class InfAura extends Module {
             };
             FindItemResult weaponResult = InvUtils.findInHotbar(predicate);
 
-            if (shouldShieldBreak()) {
+            if (shouldShieldBreak((PlayerEntity) primary)) { // Pass player directly
                 FindItemResult axeResult = InvUtils.findInHotbar(itemStack -> itemStack.getItem() instanceof AxeItem);
                 if (axeResult.found()) weaponResult = axeResult;
             }
@@ -311,7 +272,7 @@ public class InfAura extends Module {
             InvUtils.swap(weaponResult.slot(), false);
         }
 
-        if (!itemInHand()) return;
+        if (!itemInHand((PlayerEntity) primary)) return; // Pass player directly
 
         attacking = true;
         if (rotation.get() == RotationMode.Always) Rotations.rotate(Rotations.getYaw(primary), Rotations.getPitch(primary, Target.Body));
@@ -320,7 +281,7 @@ public class InfAura extends Module {
             wasPathing = true;
         }
 
-        if (delayCheck()) targets.forEach(this::attack);
+        if (delayCheck()) targets.forEach(this::attack); // All targets are players
     }
 
     @EventHandler
@@ -330,24 +291,25 @@ public class InfAura extends Module {
         }
     }
 
-    private boolean shouldShieldBreak() {
+    // Modified to take PlayerEntity directly since targets list only contains players
+    private boolean shouldShieldBreak(PlayerEntity player) {
         if (mc.world == null || mc.player == null) return false;
-        for (Entity target : targets) {
-            if (target instanceof PlayerEntity player) {
-                if (player.isBlocking() && shieldMode.get() == ShieldMode.Break) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        // Only need to check the passed player, as the list is homogeneous
+        return player.isBlocking() && shieldMode.get() == ShieldMode.Break;
     }
+
 
     private boolean entityCheck(Entity entity) {
         if (mc.player == null || mc.world == null) return false;
-        if (entity.equals(mc.player) || entity.equals(mc.cameraEntity)) return false;
-        if ((entity instanceof LivingEntity livingEntity && livingEntity.isDead()) || !entity.isAlive()) return false;
 
-        Box hitbox = entity.getBoundingBox();
+        // --- HARDCODED PLAYER ONLY TARGETING ---
+        if (!(entity instanceof PlayerEntity player)) return false; // Cast directly if PlayerEntity
+        // --- END HARDCODED ---
+
+        if (player.equals(mc.player) || player.equals(mc.cameraEntity)) return false;
+        if (player.isDead() || !player.isAlive()) return false; // Use player directly
+
+        Box hitbox = player.getBoundingBox();
         if (!PlayerUtils.isWithin(
             MathHelper.clamp(mc.player.getX(), hitbox.minX, hitbox.maxX),
             MathHelper.clamp(mc.player.getY(), hitbox.minY, hitbox.maxY),
@@ -355,52 +317,16 @@ public class InfAura extends Module {
             range.get()
         )) return false;
 
-        if (!entities.get().contains(entity.getType())) return false;
-        if (ignoreNamed.get() && entity.hasCustomName()) return false;
-        if (!PlayerUtils.canSeeEntity(entity) && !PlayerUtils.isWithin(entity, wallsRange.get())) return false;
+        // ignoreNamed can still apply to players
+        if (ignoreNamed.get() && player.hasCustomName()) return false;
 
-        if (ignoreTamed.get() && entity instanceof Tameable) {
-            // Cast to Ownable to access getOwnerUuid()
-            Ownable ownableEntity = (Ownable) entity;
-            if (ownableEntity.getOwnerUuid() != null && ownableEntity.getOwnerUuid().equals(mc.player.getUuid())) {
-                return false;
-            }
-        }
+        if (!PlayerUtils.canSeeEntity(player) && !PlayerUtils.isWithin(player, wallsRange.get())) return false;
 
-        if (ignorePassive.get()) {
-            if (entity instanceof EndermanEntity enderman && !enderman.isAngry()) return false;
-            if (entity instanceof ZombifiedPiglinEntity piglin && !piglin.isAttacking()) return false;
-            if (entity instanceof WolfEntity wolf && !wolf.isAttacking()) {
-                 // Cast to Ownable to access getOwnerUuid() for WolfEntity
-                Ownable ownableWolf = (Ownable) wolf;
-                if (ownableWolf.getOwnerUuid() != null && ownableWolf.getOwnerUuid().equals(mc.player.getUuid())) {
-                    // It's our own wolf and it's not attacking, so don't attack it.
-                } else if (ownableWolf.getOwnerUuid() == null || !ownableWolf.getOwnerUuid().equals(mc.player.getUuid())) {
-                    // It's a wild wolf or someone else's wolf and it's not attacking, ignore.
-                    // This specific condition might need adjustment based on desired behavior for non-owned, non-attacking wolves.
-                    // The original check was `wolf.getOwnerUuid() != mc.player.getUuid()`, which would attack unowned, non-aggressive wolves.
-                    // For now, let's keep it simple: if it's not attacking AND it's not OUR wolf, ignore it.
-                    // If it IS our wolf and not attacking, it's already handled by ignoreTamed if that's on.
-                    // The `ignoreTamed` check for general Tameable should cover our wolf.
-                    // So, if it's a wolf, not attacking, and not ours, then return false.
-                    return false; // Simplified: if not angry and not our tamed wolf (covered by ignoreTamed), ignore.
-                                  // If it *is* our tamed wolf, ignoreTamed handles it.
-                                  // If it's wild and not angry, ignore.
-                }
-            }
-        }
-        if (entity instanceof PlayerEntity player) {
-            if (player.isCreative()) return false;
-            if (Friends.get() != null && !Friends.get().shouldAttack(player)) return false;
-            if (shieldMode.get() == ShieldMode.Ignore && player.isBlocking()) return false;
-        }
-        if (entity instanceof AnimalEntity animal) {
-            return switch (mobAgeFilter.get()) {
-                case Baby -> animal.isBaby();
-                case Adult -> !animal.isBaby();
-                case Both -> true;
-            };
-        }
+        // Player-specific checks (already know it's a PlayerEntity)
+        if (player.isCreative()) return false;
+        if (Friends.get() != null && !Friends.get().shouldAttack(player)) return false;
+        if (shieldMode.get() == ShieldMode.Ignore && player.isBlocking()) return false;
+
         return true;
     }
 
@@ -411,17 +337,17 @@ public class InfAura extends Module {
             return false;
         }
 
-        float delay = (customDelay.get()) ? hitDelay.get() : 0.5f;
-        if (tpsSync.get() && TickRate.INSTANCE.getTickRate() > 0) { // Avoid division by zero if tick rate is 0
-             delay /= (TickRate.INSTANCE.getTickRate() / 20);
+        float delayValue = (customDelay.get()) ? hitDelay.get() : 0.5f; // Renamed 'delay' to 'delayValue'
+        if (tpsSync.get() && TickRate.INSTANCE.getTickRate() > 0) {
+             delayValue /= (TickRate.INSTANCE.getTickRate() / 20);
         }
 
-
         if (customDelay.get()) {
-            if (hitTimer < delay) {
+            if (hitTimer < delayValue) {
                 hitTimer++;
                 return false;
             } else {
+                // hitTimer reset in attack()
                 return true;
             }
         } else {
@@ -430,7 +356,7 @@ public class InfAura extends Module {
     }
 
 
-    private void attack(Entity target) {
+    private void attack(Entity target) { // target will always be a PlayerEntity
         if (mc.player == null || mc.interactionManager == null) return;
         if (rotation.get() == RotationMode.OnHit) Rotations.rotate(Rotations.getYaw(target), Rotations.getPitch(target, Target.Body));
 
@@ -441,13 +367,13 @@ public class InfAura extends Module {
         mc.player.swingHand(Hand.MAIN_HAND);
         ModuleUtils.splitTeleport(target.getPos(), originalPos, perBlink.get());
 
-
         hitTimer = 0;
     }
 
-    private boolean itemInHand() {
+    // Modified to take PlayerEntity directly
+    private boolean itemInHand(PlayerEntity playerContext) { // playerContext is the current target
         if (mc.player == null) return false;
-        if (shouldShieldBreak()) return mc.player.getMainHandStack().getItem() instanceof AxeItem;
+        if (shouldShieldBreak(playerContext)) return mc.player.getMainHandStack().getItem() instanceof AxeItem;
 
         return switch (weapon.get()) {
             case Axe -> mc.player.getMainHandStack().getItem() instanceof AxeItem;
@@ -460,7 +386,7 @@ public class InfAura extends Module {
     }
 
     public Entity getTarget() {
-        if (!targets.isEmpty()) return targets.getFirst();
+        if (!targets.isEmpty()) return targets.getFirst(); // Will be a PlayerEntity
         return null;
     }
 
@@ -490,10 +416,3 @@ public class InfAura extends Module {
         Break,
         None
     }
-
-    public enum EntityAge {
-        Baby,
-        Adult,
-        Both
-    }
-}
