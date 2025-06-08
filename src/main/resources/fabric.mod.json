@@ -14,9 +14,6 @@
       "me.juusk.meteorextras.MeteorExtras"
     ]
   },
-  "mixins": [
-    "meteorextras.mixins.json"
-  ],
   "custom": {
     "meteor-client:color": "225,25,25"
   },
